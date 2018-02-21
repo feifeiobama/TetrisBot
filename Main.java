@@ -1,5 +1,3 @@
-// 暂时拿单纯“带洞的行数”当作估值
-
 import java.util.*;
 import java.util.function.*;
 import java.util.stream.*;
@@ -7,8 +5,9 @@ import static java.lang.Math.*;
 
 public class Main {
     static class Args {
-        static final double BlkC = 100, PosC = 2;
-        static final double Dead = 100;
+        static final double BlkC = 4.0, PosC = 2.0;
+        static final double[] Arg = {1.00, 0.29};
+        static final double Dead = 100.0;
         static final long Clk = System.nanoTime() + 2500_000_000L;
     }
     static class Rule {
@@ -30,7 +29,6 @@ public class Main {
             new Block(0, 1, 0, 3, Masks[5], 2),
             new Block(1, 0, 1, 1, Masks[6], 1)
         };
-        static final int Full = (1 << W) - 1;
         static final int[] bonus = {0, 1, 3, 5, 7};
     }
 
@@ -79,11 +77,18 @@ public class Main {
         BiFunction<Integer, Integer, IntUnaryOperator>
             index = (y, r) -> (i -> y + upperY[r] - i),
             fmask = (x, r) -> (i -> mask[r][i] << (x + lowerX[r]));
+        Function<int[], IntPredicate>
+            avail = line -> (p -> lines.apply(toR(p)).allMatch(i -> {
+                int idex = index.apply(toY(p), toR(p)).applyAsInt(i),
+                    mask = fmask.apply(toX(p), toR(p)).applyAsInt(i);
+                return (line[idex] & mask) == 0;
+            }));
     }
 
     static class Board {
         static class PlayerBoard implements Cloneable {
             private int[] used = new int[Rule.T], line = new int[Rule.H];
+            private int[] mask = null;
             private Block curr, next;
             int[] cache;
             int score = 0;
@@ -95,7 +100,7 @@ public class Main {
                 curr.lines.apply(r).forEach(i -> {
                     int index = curr.index.apply(y, r).applyAsInt(i),
                         fmask = curr.fmask.apply(x, r).applyAsInt(i);
-                    if ((line[index] | fmask) == Rule.Full) {
+                    if ((line[index] | fmask) == (1 << Rule.W) - 1) {
                         full.add(0, line[index]);
                         System.arraycopy(line, index+1, line, index, Rule.H-index-1);
                         line[Rule.H - 1] = 0;
@@ -119,16 +124,15 @@ public class Main {
                 return IntStream.range(0, Rule.T)
                     .filter(i -> used[i] < min + 2).toArray();
             }
+            void calcMask() {
+                mask = new int[Rule.H + 1];
+                IntStream.rangeClosed(1, Rule.H).map(i -> Rule.H - i)
+                    .forEach(i -> mask[i] = mask[i + 1] | line[i]);
+            }
             int[] availPos() {
                 boolean[] avail = new boolean[Rule.P], dfsav = new boolean[Rule.P];
-                IntStream.of(curr.board).forEach(p -> {
-                    int x = Block.toX(p), y = Block.toY(p), r = Block.toR(p);
-                    avail[p] = curr.lines.apply(r).allMatch(i -> {
-                        int index = curr.index.apply(y, r).applyAsInt(i),
-                            fmask = curr.fmask.apply(x, r).applyAsInt(i);
-                        return (line[index] & fmask) == 0;
-                    });
-                });
+                IntStream.of(curr.board).forEach(p -> 
+                    avail[p] = curr.avail.apply(line).test(p));
                 IntConsumer[] dfs = new IntConsumer[1];
                 dfs[0] = p -> {
                     if (!avail[p] || dfsav[p]) return;
@@ -139,24 +143,27 @@ public class Main {
                     if (curr.lastY.test(p)) dfs[0].accept(p - Rule.R);
                     dfs[0].accept((p / Rule.R) * Rule.R + (p + 1) % Rule.R);
                 };
-                IntStream.of(curr.fceil).forEach(p -> dfs[0].accept(p));
+                if (mask == null) calcMask();
+                IntStream.of(curr.fceil).filter(p -> curr.avail.apply(mask).test(p))
+                    .forEach(p -> dfs[0].accept(p));
                 return IntStream.of(curr.board).filter(p -> curr.withR.test(p) &&
                     dfsav[p] && !(curr.lastY.test(p) && dfsav[p - Rule.R])).toArray();
             }
             double evaluate() {
-                int height = (int) IntStream.of(line).filter(i -> i != 0).count();
-                int[] mask = new int[Rule.H + 1];
-                IntStream.rangeClosed(1, Rule.H).map(i -> Rule.H - i)
-                    .forEach(i -> mask[i] = mask[i + 1] | line[i]);
-                int holes = (int) IntStream.range(0, Rule.H)
-                    .filter(i -> (mask[i] & ~line[i]) != 0).count();
-                return 3.0 * holes + height;
+                if (mask == null) calcMask();
+                return Args.Arg[0] * IntStream.range(0, Rule.H)
+                           .filter(i -> (mask[i] & ~line[i]) != 0).count()
+                     + Args.Arg[1] * IntStream.of(mask)
+                           .map(x -> (int) IntStream.rangeClosed(0, Rule.W - 1)
+                               .map(i ->(((x + (1 << Rule.W)) << 1) + 1) >> i)
+                               .filter(y -> (y & 7) == 5).count()).sum();
             }
 
             protected PlayerBoard clone() throws CloneNotSupportedException {
                 PlayerBoard p = (PlayerBoard) super.clone();
                 p.used = used.clone();
                 p.line = line.clone();
+                p.mask = null;
                 return p;
             }
         }
