@@ -265,8 +265,8 @@ public class Main {
         }
         double valDead(boolean[] dead) {
             int s1 = opBoard[0].score, s2 = opBoard[1].score;
-            if (dead[0] && !dead[1] || s1 < s2) return Args.Dead;
-            if (!dead[0] && dead[0] || s1 > s2) return - Args.Dead;
+            if (!dead[1] || (dead[0] && s1 < s2)) return Args.Dead;
+            if (!dead[0] || (dead[1] && s1 > s2)) return - Args.Dead;
             return 0;
         }
         Board procStep(int[] s) {
